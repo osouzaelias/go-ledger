@@ -67,7 +67,7 @@ func addDebit(wg *sync.WaitGroup, n int, client *dynamodb.Client) {
 		payments = append(payments, payment)
 
 		if len(payments) == 25 || i == n-1 {
-			writeBatch(client, payments, "ledger-poc")
+			writeBatch(client, payments)
 			payments = []Payment{} // Reset do slice para o próximo lote
 		}
 	}
@@ -76,10 +76,10 @@ func addDebit(wg *sync.WaitGroup, n int, client *dynamodb.Client) {
 func addCredit(wg *sync.WaitGroup, n int, client *dynamodb.Client) {
 	defer wg.Done()
 
-	n2 := n * 2
+	n4 := n * 4
 
 	var payments []Payment
-	for i := 0; i < n2; i++ {
+	for i := 0; i < n4; i++ {
 		payment := Payment{
 			PartitionKey:     gofakeit.UUID(),
 			Operation:        "CREDIT",
@@ -93,14 +93,14 @@ func addCredit(wg *sync.WaitGroup, n int, client *dynamodb.Client) {
 
 		payments = append(payments, payment)
 
-		if len(payments) == 25 || i == n2-1 {
-			writeBatch(client, payments, "ledger-poc")
+		if len(payments) == 25 || i == n4-1 {
+			writeBatch(client, payments)
 			payments = []Payment{} // Reset do slice para o próximo lote
 		}
 	}
 }
 
-func writeBatch(client *dynamodb.Client, payments []Payment, tableName string) {
+func writeBatch(client *dynamodb.Client, payments []Payment) {
 	requestItems := make([]types.WriteRequest, len(payments))
 	for i, payment := range payments {
 		av, err := attributevalue.MarshalMap(payment)
@@ -117,7 +117,7 @@ func writeBatch(client *dynamodb.Client, payments []Payment, tableName string) {
 
 	input := &dynamodb.BatchWriteItemInput{
 		RequestItems: map[string][]types.WriteRequest{
-			tableName: requestItems,
+			"ledger-poc": requestItems,
 		},
 	}
 
