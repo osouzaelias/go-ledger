@@ -3,13 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/brianvoe/gofakeit/v6"
 	"log"
-	"sync"
 )
 
 type Payment struct {
@@ -23,8 +23,11 @@ type Payment struct {
 	Currency         string  `dynamodbav:"currency"`
 }
 
+const TABLE string = "ledger-update-poc"
+const REGION string = "us-west-2"
+
 func main() {
-	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion("us-west-2"))
+	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(REGION))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -37,20 +40,10 @@ func main() {
 		log.Fatal(err)
 	}
 
-	var wg sync.WaitGroup
-
-	wg.Add(1)
-	go addCredit(&wg, n, client)
-
-	wg.Add(1)
-	go addDebit(&wg, n, client)
-
-	wg.Wait()
+	addCredit(n, client)
 }
 
-func addDebit(wg *sync.WaitGroup, n int, client *dynamodb.Client) {
-	defer wg.Done()
-
+func addCredit(n int, client *dynamodb.Client) {
 	var payments []Payment
 	for i := 0; i < n; i++ {
 		payment := Payment{
@@ -60,7 +53,7 @@ func addDebit(wg *sync.WaitGroup, n int, client *dynamodb.Client) {
 			CreditCardNumber: gofakeit.CreditCardNumber(nil),
 			CreditCardCvv:    gofakeit.CreditCardCvv(),
 			CreditCardExp:    gofakeit.CreditCardExp(),
-			Price:            gofakeit.Price(-1000000, 0),
+			Price:            gofakeit.Price(1000000, 0),
 			Currency:         gofakeit.CurrencyShort(),
 		}
 
@@ -68,36 +61,48 @@ func addDebit(wg *sync.WaitGroup, n int, client *dynamodb.Client) {
 
 		if len(payments) == 25 || i == n-1 {
 			writeBatch(client, payments)
+			updatePriceToNegative(client, payments)
 			payments = []Payment{} // Reset do slice para o próximo lote
 		}
 	}
 }
 
-func addCredit(wg *sync.WaitGroup, n int, client *dynamodb.Client) {
-	defer wg.Done()
-
-	n4 := n * 4
-
-	var payments []Payment
-	for i := 0; i < n4; i++ {
-		payment := Payment{
-			PartitionKey:     gofakeit.UUID(),
-			Operation:        "CREDIT",
-			CreditCardType:   gofakeit.CreditCardType(),
-			CreditCardNumber: gofakeit.CreditCardNumber(nil),
-			CreditCardCvv:    gofakeit.CreditCardCvv(),
-			CreditCardExp:    gofakeit.CreditCardExp(),
-			Price:            gofakeit.Price(1, 1000000),
-			Currency:         gofakeit.CurrencyShort(),
+func updatePriceToNegative(client *dynamodb.Client, payments []Payment) {
+	for _, payment := range payments {
+		key, err := attributevalue.MarshalMap(map[string]string{
+			"pk": payment.PartitionKey,
+		})
+		if err != nil {
+			log.Fatal(err)
 		}
 
-		payments = append(payments, payment)
+		update := "SET price = :p"
+		exprAttrValues, err := attributevalue.MarshalMap(map[string]float64{
+			":p": -abs(payment.Price), // assegura que o preço é negativo
+		})
+		if err != nil {
+			log.Fatal(err)
+		}
 
-		if len(payments) == 25 || i == n4-1 {
-			writeBatch(client, payments)
-			payments = []Payment{} // Reset do slice para o próximo lote
+		input := &dynamodb.UpdateItemInput{
+			TableName:                 aws.String(TABLE),
+			Key:                       key,
+			UpdateExpression:          aws.String(update),
+			ExpressionAttributeValues: exprAttrValues,
+		}
+
+		_, err = client.UpdateItem(context.Background(), input)
+		if err != nil {
+			log.Fatal(err)
 		}
 	}
+}
+
+func abs(x float64) float64 {
+	if x < 0 {
+		return -x
+	}
+	return x
 }
 
 func writeBatch(client *dynamodb.Client, payments []Payment) {
@@ -117,7 +122,7 @@ func writeBatch(client *dynamodb.Client, payments []Payment) {
 
 	input := &dynamodb.BatchWriteItemInput{
 		RequestItems: map[string][]types.WriteRequest{
-			"ledger-poc": requestItems,
+			TABLE: requestItems,
 		},
 	}
 
