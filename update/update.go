@@ -44,8 +44,11 @@ func main() {
 }
 
 func addCredit(n int, client *dynamodb.Client) {
+
+	n4 := n * 4
+
 	var payments []Payment
-	for i := 0; i < n; i++ {
+	for i := 0; i < n4; i++ {
 		payment := Payment{
 			PartitionKey:     gofakeit.UUID(),
 			Operation:        "DEBIT",
@@ -59,7 +62,7 @@ func addCredit(n int, client *dynamodb.Client) {
 
 		payments = append(payments, payment)
 
-		if len(payments) == 25 || i == n-1 {
+		if len(payments) == 25 || i == n4-1 {
 			writeBatch(client, payments)
 			updatePriceToNegative(client, payments)
 			payments = []Payment{} // Reset do slice para o próximo lote
@@ -78,7 +81,7 @@ func updatePriceToNegative(client *dynamodb.Client, payments []Payment) {
 
 		update := "SET price = :p"
 		exprAttrValues, err := attributevalue.MarshalMap(map[string]float64{
-			":p": -abs(payment.Price), // assegura que o preço é negativo
+			":p": -abs(payment.Price),
 		})
 		if err != nil {
 			log.Fatal(err)
